@@ -1,0 +1,5 @@
+#Example config file (Can rename to config.txt)
+
+nodes: 10.10.104.[74-77]
+
+package-dependencies:clustershell

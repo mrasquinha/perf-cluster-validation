@@ -1,0 +1,9 @@
+#Mitchelle Rasquinha Notes for Perf cluster validation package
+-------------------------------------------------------------
+
+1. Notes are based on the tools in https://github.com/MapRPS/cluster-validation project. Professional services use this tool for verifying customer installations before and after product installation.
+
+- Need a pre-requisite check for tools that the package depends on.
+(clush, password less ssh )
+- Write all scripts as smaller utilities that can be used independently when needed
+
