@@ -1,5 +1,9 @@
 #Example config file (Can rename to config.txt)
 
 nodes: 10.10.104.[74-77]
+cldb-nodes: 10.10.104.74
+data-nodes: 10.10.104.[75-77]
 
 package-dependencies:clustershell
+MAPR_CLUSTER_INSTALL=/root/mapr-cluster-scripts
+MAPR_CLUSTER_INSTALL_ROLES=/root/mapr-cluster-scripts/roles/mapr_roles.maprdb
