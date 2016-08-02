@@ -7,20 +7,22 @@
 # v2: Compare speeds with previously benchmarked numbers
 # or "what we expect" numbers
 
-source $PWD/util.sh
+function print_msg () {
+  echo "$1" | sed 's/^.*ERROR/ERROR/g' | sed 's/\[$//g'
+}
 
 if [ $# -ne 1 ]; then 
   echo "Usage: ./parse_hw_report.sh <hw_report_file>"
 fi
 
 report=$1
-IFS=$'\n'
 
 #Report any previous errors found
-grep ERROR $report
+echo "Errors found in report"
+grep ERROR $report | sed 's/^.*ERROR/ERROR/g' | sed 's/\[$//g'
 
 function verify_CPU() {
-local start=$2
+local start=$1
 local end=$2
 
 # Cannot have multiple lines for On-line CPU(s) list:
@@ -28,21 +30,25 @@ local onlinecpus_found=0
 # Cannot have multiple Model Name:
 local model_found=0
 
-for line in $(sed -n -e "$start,$end p" $report); do
-  if [[ $line =~ "On-line CPU(s) list:" && $onlinecpus_found == 0 ]]; then
-    onlinecpus_found=1
-    echo $line
-  else
-    print_warn "Are CPU's homogenous? $line"
+while read line ; do
+  if [[ $line =~ "On-line CPU(s) list:" ]]; then
+    if [[ $onlinecpus_found == 0 ]]; then
+      onlinecpus_found=1
+      echo $line
+    else
+      print_msg "Are CPU's homogenous? $line"
+    fi
   fi
 
-  if [[ $line =~ "Model name:" && $model_found == 0 ]]; then
-    model_found=1
-    echo $line
-  else
-    print_warn "Are CPU's homogenous? $line"
+  if [[ $line =~ "Model name:" ]]; then 
+    if [[ $model_found == 0 ]]; then
+      model_found=1
+      echo $line
+    else
+      print_msg "Are CPU's homogenous? $line"
+    fi
   fi
-done
+done < <(sed -n -e "$start,$end p" $report)
 }
 
 function verify_NIC() {
@@ -53,40 +59,46 @@ local ethspeed=0
 local speed_found=0
 local duplex_found=0
 local duplex=0
+local nic_cnt=0
 
-for line in $(sed -n -e "$start,$end p" $report); do
-  if [[ $line =~ "Speed:" && $speed_found == 0 ]]; then
-    speed_found=1
-    ethspeed=$(echo $line | grep -o '[0-9]*')
-  elif [[ $line =~ "Speed:" ]]; then
-    local s=$(echo $line | grep -o '[0-9]*')
-    if [[ $s == $ethspeed ]]; then
-      print_warn "Is network homogenous? Found speeds $s and $ethspeed"
+while read line ; do
+  if [[ $line =~ "Speed:" ]]; then
+    nic_cnt=$(($nic_cnt + 1))
+    if [[ $speed_found == 0 ]]; then
+      speed_found=1
+      ethspeed=$(echo $line | grep -o '[0-9]*')
+    else 
+      local s=$(echo $line | grep -o '[0-9]*')
+      if [[ $s != $ethspeed ]]; then
+        print_msg "Is network homogenous. Varying Network speed?"
+      fi
     fi
   fi
 
   if [[ $line =~ "Duplex:" && $duplex_found == 0 ]]; then
     duplex_found=1
     duplex=$(echo $line | sed 's/\s*Duplex:\s*//g')
-  elif [[ $lien =~ "Duplex:" ]]; then
+  elif [[ $line =~ "Duplex:" ]]; then
     local s=$(echo $line | sed 's/\s*Duplex:\s*//g')
-    print_warn "Check network on cluster? Found $duplex and $s duplex"
+    if [[ "$s" != "$duplex" ]]; then
+      print_msg "Check network on cluster. All Full Duplex?"
+    fi
   fi
-done
-  echo "Cluster has network with $duplex duplex at $ethspeed Mb/s"
+done < <(sed -n -e "$start,$end p" $report)
+  printf "Number NIC's per node: $nic_cnt \t Each is $duplex duplex at $ethspeed Mbps \n"
 }
 
 function verify_OS() {
 local start=$1
 local end=$2
-for line in $(sed -n -e "$start,$end p" $report); do
+while read line ; do
   local os=""
   local os_version=""
   if [[ $line =~ "CentOS Linux release" ]]; then
     if [[ -z $os_version ]]; then
       os_version=$line
     else
-      print_warn "Mutiple OS on cluster"
+      print_msg "Mutiple OS on cluster"
     fi
     echo $line
   fi
@@ -94,10 +106,10 @@ for line in $(sed -n -e "$start,$end p" $report); do
     if [[ -z $os ]]; then
       os=$line
     else
-      print_warn "Mutiple OS on cluster"
+      print_msg "Mutiple OS on cluster"
     fi
   fi
-done
+done < <(sed -n -e "$start,$end p" $report)
 }
 
 function verify_Disks() {
@@ -105,28 +117,50 @@ local start=$1
 local end=$2
 local blkdevices_found=0
 local mntdevices_found=0
+local print_msg=0
 
+while read line ; do
+  if [[ $line =~ "Block Devices" ]]; then
+    if [[ $blkdevices_found == 1 ]]; then
+      if [[ $print_msg == 0 ]]; then
+        print_msg=1
+        print_msg "Disks not homogenous across cluster; Check section with Begin Disk Audits"
+      fi
+    else
+      blkdevices_found=1
+    fi
+  fi
+  
+  if [[ $line =~ "Mount Disks" ]]; then
+    if [[ $mntdevices_found == 1 ]]; then
+      if [[ $print_msg == 0 ]]; then
+        print_msg=1
+        print_msg "Disks not homogenous across cluster; Check section with Begin Disk Audits"
+      fi
+    else
+      mntdevices_found=1
+    fi
+  fi
+done < <(sed -n -e "$start,$end p" $report)
 }
 
 
 checks=("OS" "CPU" "NIC" "Disks")
 
-
 for c in ${checks[@]}; do
-  echo $c
-  begin=($(grep -n "Begin Verify $c" $report| cut -d ':' -f 1))
+  begin=($(grep -n "Begin $c Audits" $report| cut -d ':' -f 1))
   if [[ ${#begin[@]} -ne 1 ]]; then
     echo "Input hw report is corrupt. Multiple Begin $c sections"
   fi
 
-  end=($(grep -n "End Verify $c" $report| cut -d ':' -f 1))
+  end=($(grep -n "End $c Audits" $report| cut -d ':' -f 1))
   if [[ ${#end[@]} -ne 1 ]]; then
     echo "Input hw report is corrupt. Multiple End $c sections"
   fi
 
   case $c in
     OS) verify_OS ${begin[0]} ${end[0]} ;;
-    CPU) verify_OS ${begin[0]} ${end[0]} ;;
+    CPU) verify_CPU ${begin[0]} ${end[0]} ;;
     NIC) verify_NIC ${begin[0]} ${end[0]} ;;
     Disks) verify_Disks ${begin[0]} ${end[0]} ;;
   esac
